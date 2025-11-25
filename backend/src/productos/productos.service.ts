@@ -42,14 +42,30 @@ export class ProductosService {
     return this.productoRepository.save(producto);
   }
 
-  async search(term: string): Promise<Producto[]> {
-    return this.productoRepository.find({
-      where: {
-        nombre: Like(`%${term}%`),
-        estado: true,
-      },
-      take: 10, // Limita los resultados para no sobrecargar el frontend
+  async search(term: string): Promise<any[]> { // Cambiado a Promise<any[]> porque el retorno es un objeto con stock_total calculado
+    const qb = this.productoRepository.createQueryBuilder('producto');
+
+    qb.leftJoinAndSelect('producto.marca', 'marca')
+      .leftJoinAndSelect('producto.categoria', 'categoria')
+      .leftJoin('producto.lotes', 'lote', 'lote.estado = :estado', { estado: true })
+      .addSelect('COALESCE(SUM(lote.stock), 0)', 'stock_total')
+      .where('producto.nombre LIKE :nombre AND producto.estado = :prodEstado', { nombre: `%${term}%`, prodEstado: true })
+      .groupBy('producto.id, marca.id, categoria.id')
+      .orderBy('producto.nombre', 'ASC')
+      .take(10); // Limita los resultados
+
+    const productosConStock = await qb.getRawAndEntities();
+
+    // Mapea para tener el formato Producto original + stock_total
+    const data = productosConStock.entities.map((p) => {
+        const raw = productosConStock.raw.find(r => r.producto_id === p.id);
+        return {
+            ...p,
+            stock_total: raw ? parseInt(raw.stock_total, 10) : 0,
+        };
     });
+
+    return data;
   }
 
   async findAll(options: { page: number, limit: number }): Promise<{ data: any[], total: number, page: number, lastPage: number }> {

@@ -14,6 +14,7 @@ interface VentasPageProps {
 }
 
 const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
+  console.log('Token en VentasPage:', token); // <-- LÍNEA DE DEPURACIÓN
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [searchResults, setSearchResults] = useState<Producto[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -22,12 +23,13 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
   const [isProcessingSale, setIsProcessingSale] = useState<boolean>(false);
   const [saleMessage, setSaleMessage] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const navigate = useNavigate();
+  const searchInputRef = React.useRef<HTMLInputElement>(null);
 
   const IGV_RATE = 0.18; // Tasa de IGV (Impuesto General a las Ventas)
 
   // Cálculos de totales del carrito
   const { subtotal, impuestos, total } = useMemo(() => {
-    const calcSubtotal = cartItems.reduce((sum, item) => sum + (item.producto.precio_venta * item.cantidad), 0);
+    const calcSubtotal = cartItems.reduce((sum, item) => sum + (parseFloat(item.producto.precio_venta as any) * item.cantidad), 0);
     const calcImpuestos = calcSubtotal * IGV_RATE;
     const calcTotal = calcSubtotal + calcImpuestos;
     return {
@@ -46,7 +48,7 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/productos/search?term=${searchTerm}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/productos/search?term=${searchTerm}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -97,6 +99,11 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
         }
       }
     });
+
+    // Limpiar y enfocar para la siguiente búsqueda
+    setSearchTerm('');
+    setSearchResults([]);
+    searchInputRef.current?.focus();
     setSaleMessage(null); // Limpiar mensaje de venta al añadir al carrito
   };
 
@@ -155,7 +162,7 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
         total: total,
       };
 
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/ventas`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/ventas`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -201,26 +208,49 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
           <h2>Carrito de Compras</h2>
           <div className="cart-items">
             {cartItems.length === 0 ? (
-              <p>El carrito está vacío.</p>
+              <p className="empty-cart-message">El carrito está vacío.</p>
             ) : (
-              cartItems.map((item) => (
-                <div key={item.producto.id} className="cart-item">
-                  <p>{item.producto.nombre}</p>
-                  <div className="cart-item-controls">
-                    <button onClick={() => updateCartItemQuantity(item.producto.id, item.cantidad - 1)}>-</button>
-                    <input
-                      type="number"
-                      value={item.cantidad}
-                      onChange={(e) => updateCartItemQuantity(item.producto.id, parseInt(e.target.value))}
-                      min="1"
-                      max={item.producto.stock_total} // Limitar la cantidad al stock disponible
-                    />
-                    <button onClick={() => updateCartItemQuantity(item.producto.id, item.cantidad + 1)}>+</button>
-                    <button className="btn-remove" onClick={() => removeCartItem(item.producto.id)}>X</button>
-                  </div>
-                  <p>${(item.producto.precio_venta * item.cantidad).toFixed(2)}</p>
-                </div>
-              ))
+              <table className="cart-table">
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Cantidad</th>
+                    <th>P. Unitario</th>
+                    <th>Total</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cartItems.map((item) => (
+                    <tr key={item.producto.id} className="cart-item-row">
+                      <td data-label="Producto">{item.producto.nombre}</td>
+                      <td data-label="Cantidad">
+                        <div className="cart-item-controls">
+                          <button onClick={() => updateCartItemQuantity(item.producto.id, item.cantidad - 1)}>-</button>
+                          <input
+                            type="number"
+                            value={item.cantidad}
+                            onChange={(e) => updateCartItemQuantity(item.producto.id, parseInt(e.target.value))}
+                            min="1"
+                            max={item.producto.stock_total}
+                          />
+                          <button onClick={() => updateCartItemQuantity(item.producto.id, item.cantidad + 1)}>+</button>
+                        </div>
+                      </td>
+                      <td data-label="P. Unitario">${parseFloat(item.producto.precio_venta as any).toFixed(2)}</td>
+                      <td data-label="Total">${(parseFloat(item.producto.precio_venta as any) * item.cantidad).toFixed(2)}</td>
+                      <td>
+                        <button className="btn-remove" onClick={() => removeCartItem(item.producto.id)}>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                            <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                          </svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
           <div className="cart-summary">
@@ -250,6 +280,7 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyPress={handleKeyPress}
+              ref={searchInputRef}
             />
             <button className="btn btn-secondary" onClick={handleSearch} disabled={loading}>
               {loading ? 'Buscando...' : 'Buscar'}
@@ -261,15 +292,8 @@ const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
               <p>No se encontraron productos.</p>
             )}
             {searchResults.map((producto) => (
-              <div key={producto.id} className="product-item">
-                <p><strong>{producto.nombre}</strong> - ${producto.precio_venta.toFixed(2)} ({producto.stock_total} en stock)</p>
-                <button
-                  className="btn btn-add-to-cart"
-                  onClick={() => addToCart(producto)}
-                  disabled={producto.stock_total <= 0} // Deshabilitar si no hay stock
-                >
-                  Agregar
-                </button>
+              <div key={producto.id} className="product-item clickable" onClick={() => addToCart(producto)}>
+                <p><strong>{producto.nombre}</strong> - ${parseFloat(producto.precio_venta as any).toFixed(2)} ({producto.stock_total} en stock)</p>
               </div>
             ))}
           </div>

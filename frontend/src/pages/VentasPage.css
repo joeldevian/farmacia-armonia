@@ -75,21 +75,38 @@
   flex-grow: 1;
   overflow-y: auto;
   margin-bottom: 20px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  padding: 10px;
 }
 
-.cart-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 0;
-  border-bottom: 1px dashed var(--border-color);
+.empty-cart-message {
+  text-align: center;
+  padding: 40px;
+  color: var(--secondary-text-color);
 }
 
-.cart-item:last-child {
-  border-bottom: none;
+.cart-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cart-table th,
+.cart-table td {
+  padding: 12px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.cart-table th {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--secondary-text-color);
+}
+
+.cart-item-row:hover {
+  background-color: var(--hover-background-color);
+}
+
+.cart-table td {
+  vertical-align: middle;
 }
 
 .cart-item-controls {
@@ -103,9 +120,13 @@
   color: white;
   border: none;
   border-radius: 4px;
-  padding: 3px 8px;
+  width: 28px;
+  height: 28px;
   cursor: pointer;
-  font-size: 0.9em;
+  font-size: 1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .cart-item-controls button:hover {
@@ -113,33 +134,50 @@
 }
 
 .cart-item-controls input[type="number"] {
-  width: 40px;
+  width: 45px;
   text-align: center;
   border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 3px;
   background-color: var(--input-background-color);
   color: var(--primary-text-color);
+  font-size: 1em;
+}
+
+/* Ocultar las flechas en el input de tipo number */
+.cart-item-controls input[type=number]::-webkit-inner-spin-button, 
+.cart-item-controls input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+.cart-item-controls input[type=number] {
+  -moz-appearance: textfield;
 }
 
 .btn-remove {
-  background-color: var(--error-color) !important;
-  color: white;
+  background-color: transparent !important;
+  color: var(--error-color) !important;
   border: none;
-  border-radius: 4px;
-  padding: 3px 8px;
-  cursor: pointer;
-  font-size: 0.9em;
+  padding: 0;
+  margin-left: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-remove:hover {
-  background-color: var(--error-color-dark) !important;
+  background-color: transparent !important;
+  color: var(--error-color-dark) !important;
 }
 
+.btn-remove svg {
+  width: 20px;
+  height: 20px;
+}
 
 .cart-summary {
   padding-top: 15px;
-  border-top: 1px solid var(--border-color);
+  border-top: 2px solid var(--primary-color);
 }
 
 .cart-summary p,
@@ -222,6 +260,15 @@
 
 .product-item:last-child {
   border-bottom: none;
+}
+
+.product-item.clickable {
+  cursor: pointer;
+  transition: background-color 0.2s ease-in-out;
+}
+
+.product-item.clickable:hover {
+  background-color: var(--hover-background-color);
 }
 
 .btn-add-to-cart {
