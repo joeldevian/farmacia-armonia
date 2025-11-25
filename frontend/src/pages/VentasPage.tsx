@@ -1,301 +1,245 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './VentasPage.css';
-import type { Producto } from '../types'; // Importar la interfaz Producto
+import { useCart } from '../context/CartContext';
+import type { Producto, Cliente } from '../types';
+import './VentasPage.css'; // Usaremos el mismo archivo, pero lo sobreescribiremos
 
-// Definir el tipo para un ítem en el carrito
-interface CartItem {
-  producto: Producto;
-  cantidad: number;
-}
+// --- Iconos SVG ---
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+    <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+    <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+  </svg>
+);
 
-interface VentasPageProps {
-  token: string;
-}
+// --- Componentes Reutilizables del TPV ---
 
-const VentasPage: React.FC<VentasPageProps> = ({ token }) => {
-  console.log('Token en VentasPage:', token); // <-- LÍNEA DE DEPURACIÓN
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [searchResults, setSearchResults] = useState<Producto[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [isProcessingSale, setIsProcessingSale] = useState<boolean>(false);
-  const [saleMessage, setSaleMessage] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+const ProductCard = ({ producto, onAddToCart }) => (
+  <div className="pos-product-card" onClick={() => onAddToCart(producto)}>
+    <div className="pos-product-info">
+      <p className="pos-product-name">{producto.nombre}</p>
+      <p className="pos-product-stock">{producto.stock_total} en stock</p>
+    </div>
+    <div className="pos-product-actions">
+      <p className="pos-product-price">${parseFloat(String(producto.precio_venta)).toFixed(2)}</p>
+      <button className="btn-add-product">+</button>
+    </div>
+  </div>
+);
+
+const SaleItemRow = ({ item, onUpdate, onRemove }) => (
+  <tr className="sale-item-row">
+    <td>
+      <p className="sale-item-name">{item.producto.nombre}</p>
+      <p className="sale-item-price">${parseFloat(String(item.producto.precio_venta)).toFixed(2)}</p>
+    </td>
+    <td>
+      <div className="quantity-control">
+        <button onClick={() => onUpdate(item.producto.id, String(item.cantidad - 1))}>-</button>
+        <input type="text" value={item.cantidad} onChange={e => onUpdate(item.producto.id, e.target.value)} />
+        <button onClick={() => onUpdate(item.producto.id, String(item.cantidad + 1))}>+</button>
+      </div>
+    </td>
+    <td className="sale-item-total">${(item.cantidad * parseFloat(String(item.producto.precio_venta))).toFixed(2)}</td>
+    <td>
+      <button className="btn-remove-item" onClick={() => onRemove(item.producto.id)}><TrashIcon /></button>
+    </td>
+  </tr>
+);
+
+
+// --- Componente Principal de la Página de Ventas (TPV) ---
+
+const VentasPage: React.FC<{ token: string }> = ({ token }) => {
   const navigate = useNavigate();
-  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const { cartItems, addItem, updateItemQuantity, removeItem, clearCart, subtotal, impuestos, total, saleMessage, setSaleMessage } = useCart();
+  
+  const [productos, setProductos] = useState<Producto[]>([]);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [clienteSearch, setClienteSearch] = useState('');
+  const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
+  const [tipoComprobante, setTipoComprobante] = useState('Boleta');
+  const [metodoPago, setMetodoPago] = useState('Efectivo');
 
-  const IGV_RATE = 0.18; // Tasa de IGV (Impuesto General a las Ventas)
+  const [loading, setLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // Cálculos de totales del carrito
-  const { subtotal, impuestos, total } = useMemo(() => {
-    const calcSubtotal = cartItems.reduce((sum, item) => sum + (parseFloat(item.producto.precio_venta as any) * item.cantidad), 0);
-    const calcImpuestos = calcSubtotal * IGV_RATE;
-    const calcTotal = calcSubtotal + calcImpuestos;
-    return {
-      subtotal: calcSubtotal,
-      impuestos: calcImpuestos,
-      total: calcTotal,
+  // Cargar productos al montar
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${import.meta.env.VITE_API_URL}/productos?limit=50`, { // Limitar la carga inicial
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (!response.ok) throw new Error('Error al cargar productos');
+        const data = await response.json();
+        setProductos(data.data || []);
+      } catch (error) {
+        console.error(error);
+        setSaleMessage({ type: 'error', message: 'No se pudieron cargar los productos.' });
+      } finally {
+        setLoading(false);
+      }
     };
-  }, [cartItems]);
-
-  const handleSearch = async () => {
-    if (searchTerm.trim() === '') {
-      setSearchResults([]);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/productos/search?term=${searchTerm}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Error: ${response.statusText}`);
-      }
-
-      const data: Producto[] = await response.json();
-      setSearchResults(data);
-    } catch (err) {
-      setError('Error al buscar productos. Inténtalo de nuevo.');
-      console.error('Error searching products:', err);
-      setSearchResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleSearch();
-    }
-  };
-
-  const addToCart = (productToAdd: Producto) => {
-    setCartItems((prevItems) => {
-      const existingItem = prevItems.find((item) => item.producto.id === productToAdd.id);
-      if (existingItem) {
-        // Si el producto ya está en el carrito, incrementa la cantidad
-        // Asegúrate de no exceder el stock disponible
-        if (existingItem.cantidad < productToAdd.stock_total) {
-          return prevItems.map((item) =>
-            item.producto.id === productToAdd.id ? { ...item, cantidad: item.cantidad + 1 } : item
-          );
-        } else {
-          setSaleMessage({ type: 'error', message: `No hay suficiente stock de ${productToAdd.nombre}.` });
-          return prevItems;
+    fetchProducts();
+  }, [token, setSaleMessage]);
+  
+  // Lógica de búsqueda de clientes
+  useEffect(() => {
+    if (clienteSearch.trim().length > 2) {
+      const fetchClientes = async () => {
+        try {
+          const response = await fetch(`${import.meta.env.VITE_API_URL}/clientes/search?term=${clienteSearch}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          const data = await response.json();
+          setClientes(data || []);
+        } catch (error) {
+          console.error("Error buscando clientes:", error);
+          setClientes([]);
         }
-      } else {
-        // Si el producto no está, añádelo con cantidad 1
-        if (productToAdd.stock_total > 0) {
-          return [...prevItems, { producto: productToAdd, cantidad: 1 }];
-        } else {
-          setSaleMessage({ type: 'error', message: `El producto ${productToAdd.nombre} no tiene stock disponible.` });
-          return prevItems;
-        }
-      }
-    });
+      };
+      fetchClientes();
+    } else {
+      setClientes([]);
+    }
+  }, [clienteSearch, token]);
 
-    // Limpiar y enfocar para la siguiente búsqueda
-    setSearchTerm('');
-    setSearchResults([]);
-    searchInputRef.current?.focus();
-    setSaleMessage(null); // Limpiar mensaje de venta al añadir al carrito
-  };
+  const filteredProducts = useMemo(() => 
+    productos.filter(p => p.nombre.toLowerCase().includes(searchTerm.toLowerCase()))
+  , [productos, searchTerm]);
 
-  const updateCartItemQuantity = (productId: string, newQuantity: number) => {
-    setSaleMessage(null); // Limpiar mensaje de venta al actualizar cantidad
-    setCartItems((prevItems) => {
-      const itemToUpdate = prevItems.find((item) => item.producto.id === productId);
-      if (!itemToUpdate) return prevItems;
-
-      if (newQuantity <= 0) {
-        return prevItems.filter((item) => item.producto.id !== productId);
-      }
-      
-      // No permitir exceder el stock disponible
-      if (newQuantity > itemToUpdate.producto.stock_total) {
-        setSaleMessage({ type: 'error', message: `No hay suficiente stock de ${itemToUpdate.producto.nombre}.` });
-        return prevItems;
-      }
-
-      return prevItems.map((item) =>
-        item.producto.id === productId ? { ...item, cantidad: newQuantity } : item
-      );
-    });
-  };
-
-  const removeCartItem = (productId: string) => {
-    setSaleMessage(null); // Limpiar mensaje de venta al eliminar del carrito
-    setCartItems((prevItems) => prevItems.filter((item) => item.producto.id !== productId));
-  };
-
-  const handleFinalizeSale = async () => {
+  const handleFinalizeSale = useCallback(async () => {
     if (cartItems.length === 0) {
-      setSaleMessage({ type: 'error', message: 'El carrito está vacío. Añade productos para finalizar la venta.' });
+      setSaleMessage({ type: 'error', message: 'No hay productos en la venta.' });
       return;
     }
-
-    setIsProcessingSale(true);
-    setSaleMessage(null);
-    setError(null);
-
+    setIsProcessing(true);
     try {
-      // Aquí puedes añadir la lógica para seleccionar un cliente, tipo de comprobante, etc.
-      // Por ahora, asumiremos valores por defecto o nulos
-      const saleData = {
-        clienteId: null, // Asumir cliente nulo por ahora
-        tipo_comprobante: 'BOLETA', // O FACTURA, según la lógica de negocio
-        metodo_pago: 'EFECTIVO', // O TARJETA, etc.
+      const ventaData = {
+        clienteId: selectedCliente?.id || null,
+        tipo_comprobante: tipoComprobante,
+        metodo_pago: metodoPago,
         detalles: cartItems.map(item => ({
           productoId: item.producto.id,
           cantidad: item.cantidad,
-          precio_unitario: item.producto.precio_venta,
-          // loteId: item.lote.id, // Si manejamos lotes específicos, habría que añadirlo al CartItem
         })),
-        subtotal: subtotal,
-        impuestos: impuestos,
-        total: total,
       };
-
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/ventas`, {
+      
+      await fetch(`${import.meta.env.VITE_API_URL}/ventas`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(saleData),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(ventaData),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Error al procesar la venta.');
-      }
-
-      const result = await response.json();
-      setSaleMessage({ type: 'success', message: `Venta #${result.numero_correlativo} realizada con éxito!` });
-      setCartItems([]); // Vaciar el carrito
-      setSearchResults([]); // Limpiar resultados de búsqueda
-      setSearchTerm(''); // Limpiar término de búsqueda
-    } catch (err: any) {
-      setError(err.message || 'Error desconocido al finalizar la venta.');
-      setSaleMessage({ type: 'error', message: err.message || 'Error al finalizar la venta.' });
-      console.error('Error finalizing sale:', err);
+      setSaleMessage({ type: 'success', message: '¡Venta realizada con éxito!' });
+      clearCart();
+      setSelectedCliente(null);
+      setClienteSearch('');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Error al procesar la venta.';
+      setSaleMessage({ type: 'error', message: errorMsg });
     } finally {
-      setIsProcessingSale(false);
+      setIsProcessing(false);
     }
+  }, [cartItems, selectedCliente, tipoComprobante, metodoPago, token, clearCart, setSaleMessage]);
+  
+  const handleSelectCliente = (cliente: Cliente) => {
+    setSelectedCliente(cliente);
+    setClienteSearch(`${cliente.nombre} ${cliente.apellido}`);
+    setClientes([]);
   };
 
-
   return (
-    <div className="ventas-page">
-      <div className="ventas-header">
-        <h1>Punto de Venta</h1>
-        <button className="btn btn-primary btn-header-action" onClick={() => navigate('/historial-ventas')}>
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16">
-                <path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm-3 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm-5 3a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm3 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1z"/>
-                <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
-            </svg>
-            Historial de Ventas
-        </button>
+    <div className="pos-page-container">
+      {/* Columna Izquierda: Catálogo */}
+      <div className="pos-catalog">
+        <div className="pos-header">
+          <h1>Catálogo de Productos</h1>
+          <input 
+            type="text" 
+            placeholder="Buscar producto..." 
+            className="pos-search-bar"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
+        </div>
+        <div className="pos-catalog-content">
+          {loading ? <p>Cargando...</p> : filteredProducts.map(p => <ProductCard key={p.id} producto={p} onAddToCart={addItem} />)}
+        </div>
       </div>
-      <div className="ventas-container">
-        <div className="ventas-left-panel">
-          <h2>Carrito de Compras</h2>
-          <div className="cart-items">
-            {cartItems.length === 0 ? (
-              <p className="empty-cart-message">El carrito está vacío.</p>
-            ) : (
-              <table className="cart-table">
-                <thead>
-                  <tr>
-                    <th>Producto</th>
-                    <th>Cantidad</th>
-                    <th>P. Unitario</th>
-                    <th>Total</th>
-                    <th></th>
-                  </tr>
-                </thead>
+
+      {/* Columna Derecha: Detalles de Venta */}
+      <div className="pos-sale-details">
+        <div className="pos-header">
+          <h1>Detalle de Venta</h1>
+          <button className="btn-historial" onClick={() => navigate('/historial-ventas')}>Historial</button>
+        </div>
+        
+        <div className="pos-sale-content">
+          {/* Sección del Cliente */}
+          <div className="client-section">
+            <input 
+              type="text" 
+              placeholder="Buscar cliente por nombre o DNI"
+              value={clienteSearch}
+              onChange={e => { setClienteSearch(e.target.value); if (selectedCliente) setSelectedCliente(null); }}
+            />
+            {clientes.length > 0 && (
+              <ul className="client-search-results">
+                {clientes.map(c => <li key={c.id} onClick={() => handleSelectCliente(c)}>{c.nombre} {c.apellido}</li>)}
+              </ul>
+            )}
+          </div>
+          
+          {/* Opciones de Venta */}
+          <div className="sale-options">
+            <div>
+              <label htmlFor="tipo_comprobante">Comprobante</label>
+              <select id="tipo_comprobante" value={tipoComprobante} onChange={e => setTipoComprobante(e.target.value)}>
+                <option value="Boleta">Boleta</option>
+                <option value="Factura">Factura</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="metodo_pago">Método de Pago</label>
+              <select id="metodo_pago" value={metodoPago} onChange={e => setMetodoPago(e.target.value)}>
+                <option value="Efectivo">Efectivo</option>
+                <option value="Tarjeta">Tarjeta</option>
+                <option value="Yape/Plin">Yape/Plin</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Items de la Venta */}
+          <div className="sale-items-container">
+            {cartItems.length > 0 ? (
+              <table className="sale-items-table">
                 <tbody>
-                  {cartItems.map((item) => (
-                    <tr key={item.producto.id} className="cart-item-row">
-                      <td data-label="Producto">{item.producto.nombre}</td>
-                      <td data-label="Cantidad">
-                        <div className="cart-item-controls">
-                          <button onClick={() => updateCartItemQuantity(item.producto.id, item.cantidad - 1)}>-</button>
-                          <input
-                            type="number"
-                            value={item.cantidad}
-                            onChange={(e) => updateCartItemQuantity(item.producto.id, parseInt(e.target.value))}
-                            min="1"
-                            max={item.producto.stock_total}
-                          />
-                          <button onClick={() => updateCartItemQuantity(item.producto.id, item.cantidad + 1)}>+</button>
-                        </div>
-                      </td>
-                      <td data-label="P. Unitario">${parseFloat(item.producto.precio_venta as any).toFixed(2)}</td>
-                      <td data-label="Total">${(parseFloat(item.producto.precio_venta as any) * item.cantidad).toFixed(2)}</td>
-                      <td>
-                        <button className="btn-remove" onClick={() => removeCartItem(item.producto.id)}>
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-                            <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-                          </svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {cartItems.map(item => <SaleItemRow key={item.producto.id} item={item} onUpdate={updateItemQuantity} onRemove={removeItem} />)}
                 </tbody>
               </table>
+            ) : (
+              <p className="empty-cart-msg">Agregue productos desde el catálogo</p>
             )}
-          </div>
-          <div className="cart-summary">
-            <p>Subtotal: <span>${subtotal.toFixed(2)}</span></p>
-            <p>Impuestos (IGV {IGV_RATE * 100}%): <span>${impuestos.toFixed(2)}</span></p>
-            <h3>Total: <span>${total.toFixed(2)}</span></h3>
-            {saleMessage && (
-              <p className={`sale-message ${saleMessage.type === 'success' ? 'success' : 'error'}`}>
-                {saleMessage.message}
-              </p>
-            )}
-            <button
-              className="btn btn-primary"
-              onClick={handleFinalizeSale}
-              disabled={cartItems.length === 0 || isProcessingSale}
-            >
-              {isProcessingSale ? 'Procesando Venta...' : 'Finalizar Venta'}
-            </button>
           </div>
         </div>
-        <div className="ventas-right-panel">
-          <h2>Buscar Productos</h2>
-          <div className="product-search">
-            <input
-              type="text"
-              placeholder="Buscar producto por nombre..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={handleKeyPress}
-              ref={searchInputRef}
-            />
-            <button className="btn btn-secondary" onClick={handleSearch} disabled={loading}>
-              {loading ? 'Buscando...' : 'Buscar'}
-            </button>
+
+        {/* Footer con Totales y Acciones */}
+        <div className="pos-sale-footer">
+          <div className="sale-summary">
+            <p>Subtotal: <span>${subtotal.toFixed(2)}</span></p>
+            <p>Impuestos (18%): <span>${impuestos.toFixed(2)}</span></p>
+            <p className="summary-total">Total: <span>${total.toFixed(2)}</span></p>
           </div>
-          <div className="product-list">
-            {error && <p className="error-message">{error}</p>}
-            {!loading && searchResults.length === 0 && searchTerm.trim() !== '' && !error && (
-              <p>No se encontraron productos.</p>
-            )}
-            {searchResults.map((producto) => (
-              <div key={producto.id} className="product-item clickable" onClick={() => addToCart(producto)}>
-                <p><strong>{producto.nombre}</strong> - ${parseFloat(producto.precio_venta as any).toFixed(2)} ({producto.stock_total} en stock)</p>
-              </div>
-            ))}
+          {saleMessage && <p className={`sale-message ${saleMessage.type}`}>{saleMessage.message}</p>}
+          <div className="sale-actions">
+            <button className="btn-cancel" onClick={clearCart}>Cancelar</button>
+            <button className="btn-finalize" onClick={handleFinalizeSale} disabled={isProcessing || cartItems.length === 0}>
+              {isProcessing ? 'Procesando...' : 'Finalizar Venta'}
+            </button>
           </div>
         </div>
       </div>

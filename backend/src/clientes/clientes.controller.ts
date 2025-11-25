@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { ClientesService } from './clientes.service';
 import { CreateClienteDto } from './dto/create-cliente.dto';
 import { UpdateClienteDto } from './dto/update-cliente.dto';
@@ -21,6 +21,12 @@ export class ClientesController {
   @Roles('Administrador', 'Empleado')
   findAll() {
     return this.clientesService.findAll();
+  }
+
+  @Get('search')
+  @Roles('Administrador', 'Empleado')
+  search(@Query('term') term: string) {
+    return this.clientesService.search(term);
   }
 
   @Get(':id')

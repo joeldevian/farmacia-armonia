@@ -112,8 +112,12 @@ export class VentaService {
           descripcion: `Salida por Venta #${savedVenta.numero_serie}-${savedVenta.numero_correlativo}`,
         });
 
+        const totalDetalle = producto.precio_venta * detalleDto.cantidad;
+
         const ventaDetalle = queryRunner.manager.create(VentaDetalle, {
           ...detalleDto,
+          precio_unitario: producto.precio_venta, // Precio autoritativo
+          subtotal: totalDetalle, // El subtotal de la línea es el total porque precio_venta incluye IGV
           venta: savedVenta,
           producto: producto,
           lote: loteSeleccionado,
@@ -121,12 +125,14 @@ export class VentaService {
 
         await queryRunner.manager.save(ventaDetalle);
 
-        savedVenta.subtotal += ventaDetalle.subtotal;
-        // Impuestos y total se recalcularán al final de la venta
+        // Acumulamos al total de la venta. El desglose se hará al final.
+        savedVenta.total += totalDetalle;
       }
 
-      savedVenta.impuestos = savedVenta.subtotal * 0.18; // Ejemplo 18% IGV
-      savedVenta.total = savedVenta.subtotal + savedVenta.impuestos;
+      // Con el total correcto, ahora desglosamos la base imponible (subtotal) y los impuestos.
+      const IGV_DIVISOR = 1.18;
+      savedVenta.subtotal = savedVenta.total / IGV_DIVISOR;
+      savedVenta.impuestos = savedVenta.total - savedVenta.subtotal;
 
       await queryRunner.manager.save(savedVenta); // Update totals
 

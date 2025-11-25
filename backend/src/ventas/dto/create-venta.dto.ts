@@ -12,11 +12,13 @@ export class CreateVentaDetalleDto {
   @IsNumber()
   cantidad: number;
 
+  @IsOptional()
   @IsNumber()
-  precio_unitario: number;
+  precio_unitario?: number;
 
+  @IsOptional()
   @IsNumber()
-  subtotal: number;
+  subtotal?: number;
 
   @IsOptional()
   @IsNumber()
@@ -34,14 +36,17 @@ export class CreateVentaDto {
   @IsString()
   metodo_pago: string;
 
+  @IsOptional()
   @IsNumber()
-  subtotal: number;
+  subtotal?: number;
 
+  @IsOptional()
   @IsNumber()
-  impuestos: number;
+  impuestos?: number;
 
+  @IsOptional()
   @IsNumber()
-  total: number;
+  total?: number;
 
   @IsArray()
   @ValidateNested({ each: true })

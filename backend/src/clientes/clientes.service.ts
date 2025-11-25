@@ -44,4 +44,17 @@ export class ClientesService {
     const cliente = await this.findOne(id);
     await this.clienteRepository.remove(cliente);
   }
+
+  async search(term: string): Promise<Cliente[]> {
+    if (!term) {
+      return [];
+    }
+
+    return this.clienteRepository
+      .createQueryBuilder('cliente')
+      .where('cliente.nombres ILIKE :term', { term: `%${term}%` })
+      .orWhere('cliente.apellidos ILIKE :term', { term: `%${term}%` })
+      .orWhere('cliente.numero_documento ILIKE :term', { term: `%${term}%` })
+      .getMany();
+  }
 }
